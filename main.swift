@@ -108,12 +108,27 @@ func mouse(_ p: CGPoint, _ type: CGEventType = .mouseMoved) { CGEvent(mouseEvent
 func key(_ k: CGKeyCode) { CGEvent(keyboardEventSource: src, virtualKey: k, keyDown: true)!.post(tap: .cghidEventTap); CGEvent(keyboardEventSource: src, virtualKey: k, keyDown: false)!.post(tap: .cghidEventTap) }
 func pause(_ s: Double) { Thread.sleep(forTimeInterval: s) }
 
+/// Mission Control is on screen when the Dock has full-screen overlay windows up (layers 18/20); this does
+/// not depend on the Dock's Accessibility tree, which can lag several seconds behind the picture.
+func missionControlVisible() -> Bool {
+    let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as! [[String: Any]]
+    return list.contains { ($0["kCGWindowOwnerName"] as? String) == "Dock" && (($0["kCGWindowLayer"] as? Int) ?? -1) > 0 }
+}
+/// Opening Mission Control.app toggles it, so only open it when it is not already up (e.g. left over from
+/// an aborted run); then wait for the Accessibility tree, and if that never shows up, close and try again.
 func openMissionControl() -> Bool {
-    NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Mission Control.app"))
-    for _ in 0..<40 { pause(0.1); if readMissionControl().contains(where: { !$0.buttons.isEmpty }) { pause(0.5); return true } }
+    for _ in 0..<3 {
+        if !missionControlVisible() {
+            NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Mission Control.app"))
+            for _ in 0..<30 { pause(0.1); if missionControlVisible() { break } }
+        }
+        guard missionControlVisible() else { continue }
+        for _ in 0..<40 { pause(0.25); if readMissionControl().contains(where: { !$0.buttons.isEmpty }) { pause(0.5); return true } }
+        key(53); pause(1.0)
+    }
     return false
 }
-func closeMissionControl() { key(53); for _ in 0..<40 { pause(0.1); if readMissionControl().isEmpty { return } } }
+func closeMissionControl() { key(53); for _ in 0..<40 { pause(0.1); if !missionControlVisible() { return } } }
 
 /// Drag the space at `index` on `fromScreen` to the end of `toScreen`'s bar. Mission Control must be open.
 func dragSpace(index: Int, from fromScreen: Screen, to toScreen: Screen) -> Bool {
@@ -187,9 +202,9 @@ func currentSpace(on screen: Screen) -> Int { Int(managedDisplayCurrentSpace(con
 typealias AXGetWindowFn = @convention(c) (AXUIElement, UnsafeMutablePointer<UInt32>) -> AXError
 let axGetWindow = unsafeBitCast(dlsym(dlopen(nil, RTLD_NOW), "_AXUIElementGetWindow"), to: AXGetWindowFn.self)
 
-/// Resize every real window of the (visible) space to the screen's work area. Returns (done, total).
-func fitWindows(in space: Int, on screen: Screen) -> (Int, Int) {
-    let wins = windowsPerSpace()[space] ?? []
+/// Move/resize the windows to the screen's work area through Accessibility (only windows on a visible
+/// space are reachable). Returns how many accepted the new frame.
+func place(_ wins: [Win], on screen: Screen) -> Int {
     var done = 0
     var axByPid: [pid_t: [AXUIElement]] = [:]
     for w in wins {
@@ -201,7 +216,27 @@ func fitWindows(in space: Int, on screen: Screen) -> (Int, Int) {
         _ = AXUIElementSetAttributeValue(el, "AXPosition" as CFString, AXValueCreate(.cgPoint, &pos)!) // some apps clamp size first, then position
         if okP && okS { done += 1 } else { print("    \(w.owner) \(w.id): resize refused") }
     }
-    return (done, wins.count)
+    return done
+}
+/// Resize every real window of the (visible) space to the screen's work area. Returns (done, total).
+func fitWindows(in space: Int, on screen: Screen) -> (Int, Int) {
+    let wins = windowsPerSpace()[space] ?? []
+    return (place(wins, on: screen), wins.count)
+}
+
+/// A window belongs to the display its frame is on: when a space moves to another display, macOS keeps every
+/// window whose frame does not reach that display behind, on the source display's current space. Moving such a
+/// window's frame onto the target display makes it join the space the target display is showing, so show the
+/// moved space there and move the strays onto it. Returns (rehomed, strays).
+func rehomeStrays(of space: Int, were: [Win], on screen: Screen) -> (Int, Int) {
+    let now = windowsPerSpace()
+    let there = Set((now[space] ?? []).map { $0.id })
+    let strays = were.filter { w in !there.contains(w.id) && now.values.contains { $0.contains { $0.id == w.id } } }
+    if strays.isEmpty { return (0, 0) }
+    guard switchTo(space: space, on: screen) else { return (0, strays.count) }
+    _ = place(strays, on: screen); pause(0.5)
+    let after = Set((windowsPerSpace()[space] ?? []).map { $0.id })
+    return (strays.filter { after.contains($0.id) }.count, strays.count)
 }
 
 // MARK: - Reserve an empty first space
@@ -302,6 +337,7 @@ if !moves.isEmpty {
         guard let alt = staying.first, switchTo(space: alt.id, on: from) else { fail("could not switch \(from.name) away from space \(cur)") }
         print("  \(from.name): showing space \(alt.id) while its space \(cur) moves")
     }
+    let before = windowsPerSpace()
     guard openMissionControl() else { fail("Mission Control did not open") }
     for m in moves {
         guard let d = managedDisplays().first(where: { $0.uuid == m.from.uuid }), let idx = d.spaces.firstIndex(where: { $0.id == m.space }) else { print("space \(m.space) vanished"); failures += 1; continue }
@@ -311,6 +347,10 @@ if !moves.isEmpty {
         if ok && now { moved.append((m.space, m.to)) } else { failures += 1 }
     }
     closeMissionControl()
+    for (space, to) in moved {
+        let (done, strays) = rehomeStrays(of: space, were: before[space] ?? [], on: to)
+        if strays > 0 { print("  space \(space): \(done)/\(strays) windows were left behind, brought over"); if done < strays { failures += 1 } }
+    }
 }
 
 if fit {
@@ -340,7 +380,7 @@ if fit || reserve {
 let finalWins = windowsPerSpace()
 for screen in scr where !screen.builtin {   // the built-in display is never "newly connected"; leave it alone
     guard let d = managedDisplays().first(where: { $0.uuid == screen.uuid }), spaceIsEmpty(currentSpace(on: screen), finalWins) else { continue }
-    let arrived = moved.first { $0.1.uuid == screen.uuid }?.0
+    let arrived = moved.first { $0.1.uuid == screen.uuid && !spaceIsEmpty($0.0, finalWins) }?.0
     guard let pick = arrived ?? d.spaces.first(where: { $0.type == 0 && !spaceIsEmpty($0.id, finalWins) })?.id else { continue }
     print("\(screen.name): showing space \(pick) instead of an empty one")
     _ = switchTo(space: pick, on: screen)

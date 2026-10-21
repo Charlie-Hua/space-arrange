@@ -50,8 +50,15 @@ A Space belongs to the app with the largest window area in it. Apps named in a r
 - Moving a Space opens Mission Control and drags the Space thumbnail onto another display's bar
   (the only way to move a Space without disabling SIP). A display's currently shown Space cannot
   be dragged, so the tool shows another Space first.
+- A window belongs to the display its frame is on. macOS sometimes leaves a moved Space's windows
+  behind on the source display's current Space; after every move the tool compares the Space's
+  windows with what arrived, shows the Space on its new display, and drags the stragglers' frames
+  onto that display through Accessibility, which makes them join the Space.
 - `--fit` switches each display to the Space and resizes windows through Accessibility, since
   AX only exposes windows on visible Spaces.
+- Mission Control is detected through the Dock's overlay windows rather than its Accessibility
+  tree, which can lag several seconds; opening Mission Control.app toggles it, so the tool only
+  opens it when it is not already up.
 - `--reserve` exists because macOS collapses a display's *first* Space into another Space when the
   display is unplugged, while the other Spaces move intact. An empty first Space means nothing gets
   merged.
