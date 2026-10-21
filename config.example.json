@@ -1,0 +1,7 @@
+{
+  "rules": [
+    { "apps": ["Google Chrome"],    "displays": ["external:2", "external:1"] },
+    { "apps": ["iTerm2", "Claude"], "displays": ["external:1"] }
+  ],
+  "fallback": "builtin"
+}
