@@ -375,9 +375,10 @@ if fit || reserve {
     }
 }
 // Never leave a display parked on an empty space (a freshly connected display shows its empty first
-// space): show the first space that arrived there, or else the first space that has windows.
+// space; the built-in one may have just lost the space it was showing): show the first space that
+// arrived there, or else the first space that has windows. A display showing a non-empty space is left alone.
 let finalWins = windowsPerSpace()
-for screen in scr where !screen.builtin {   // the built-in display is never "newly connected"; leave it alone
+for screen in scr {
     guard let d = managedDisplays().first(where: { $0.uuid == screen.uuid }), spaceIsEmpty(currentSpace(on: screen), finalWins) else { continue }
     let arrived = moved.first { $0.1.uuid == screen.uuid && !spaceIsEmpty($0.0, finalWins) }?.0
     guard let pick = arrived ?? d.spaces.first(where: { $0.type == 0 && !spaceIsEmpty($0.id, finalWins) })?.id else { continue }
