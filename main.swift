@@ -362,8 +362,7 @@ if fit {
     for (space, screen) in targets {
         guard switchTo(space: space, on: screen) else { print("fit space \(space): could not switch to it"); failures += 1; continue }
         let (done, total) = fitWindows(in: space, on: screen)
-        print("fit space \(space) on \(screen.name): \(done)/\(total) windows")
-        if done < total { failures += 1 }
+        print("fit space \(space) on \(screen.name): \(done)/\(total) windows")   // a refused resize (fixed-size window) is not a failure
     }
 }
 if reserve {
