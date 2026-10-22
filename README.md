@@ -49,7 +49,9 @@ A Space belongs to the app with the largest window area in it. Apps named in a r
   `SLSCopySpacesForWindows`; hidden windows are filtered with `SLSWindowIsOrderedIn`.
 - Moving a Space opens Mission Control and drags the Space thumbnail onto another display's bar
   (the only way to move a Space without disabling SIP). A display's currently shown Space cannot
-  be dragged, so the tool shows another Space first.
+  be dragged, so the tool shows another Space first. The target bar re-lays out while the drag is
+  over it, so the tool re-reads the thumbnails and drops past the rightmost one: moved Spaces land
+  at the end, and a freshly connected display's empty Space stays first.
 - A window belongs to the display its frame is on. macOS sometimes leaves a moved Space's windows
   behind on the source display's current Space; after every move the tool compares the Space's
   windows with what arrived, shows the Space on its new display, and drags the stragglers' frames

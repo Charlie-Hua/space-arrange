@@ -145,7 +145,17 @@ func dragSpace(index: Int, from fromScreen: Screen, to toScreen: Screen) -> Bool
         let t = CGFloat(i) / 60
         mouse(CGPoint(x: start.x + (target.x - start.x) * t, y: start.y + (target.y - start.y) * t), .leftMouseDragged); pause(0.02)
     }
-    pause(0.6); mouse(target, .leftMouseUp); pause(1.0)
+    pause(0.6)
+    // Once the drag reaches the bar, the bar re-lays out around a placeholder for the incoming space and grows
+    // to the left, so the point we aimed at now sits before the real last thumbnail. Re-read the live layout
+    // and move past its rightmost thumbnail before letting go, so the space lands at the very end.
+    var drop = target
+    if let live = mcDisplay(toScreen), let rightmost = live.buttons.map({ $0.maxX }).max() {
+        drop = CGPoint(x: rightmost + 30, y: target.y)
+        for i in 1...20 { let t = CGFloat(i) / 20; mouse(CGPoint(x: target.x + (drop.x - target.x) * t, y: target.y), .leftMouseDragged); pause(0.02) }
+        pause(0.6)
+    }
+    mouse(drop, .leftMouseUp); pause(1.0)
     return true
 }
 
